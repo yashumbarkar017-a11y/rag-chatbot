@@ -1,8 +1,13 @@
 import sys
 from pathlib import Path
+import tempfile
+import shutil
+
+import streamlit as st
+
 
 # ============================================================
-# FIX PROJECT PATH
+# PROJECT ROOT
 # ============================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -12,23 +17,21 @@ if str(ROOT_DIR) not in sys.path:
 
 
 # ============================================================
-# IMPORTS
+# PROJECT IMPORTS
 # ============================================================
-
-import streamlit as st
 
 from src.rag_chain import get_rag_response
+from src.vector_store import create_vector_store
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="RAG Chatbot",
+    page_title="StudyMate RAG",
     page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 
@@ -40,40 +43,51 @@ st.markdown(
     """
     <style>
 
-    /* Main background */
+    /* Main application */
+
     .stApp {
         background-color: #0e1117;
+        color: white;
     }
 
+
     /* Main title */
+
     .main-title {
         font-size: 42px;
         font-weight: 700;
-        text-align: center;
-        color: #ffffff;
-        margin-top: 10px;
         margin-bottom: 5px;
     }
 
+
     /* Subtitle */
+
     .subtitle {
-        text-align: center;
-        color: #9ca3af;
-        font-size: 16px;
-        margin-bottom: 30px;
+        color: #a0a0a0;
+        font-size: 17px;
+        margin-bottom: 25px;
     }
 
-    /* Source box */
+
+    /* Source card */
+
     .source-box {
         background-color: #161b22;
-        border-radius: 10px;
         padding: 12px;
-        margin-top: 10px;
+        border-radius: 10px;
+        margin-top: 8px;
+        border: 1px solid #30363d;
     }
 
-    /* Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #111827;
+
+    /* Document card */
+
+    .document-card {
+        background-color: #161b22;
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border: 1px solid #30363d;
     }
 
     </style>
@@ -83,37 +97,285 @@ st.markdown(
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "messages" not in st.session_state:
+
+    st.session_state.messages = []
+
+
+if "documents_processed" not in st.session_state:
+
+    st.session_state.documents_processed = False
+
+
+if "uploaded_files" not in st.session_state:
+
+    st.session_state.uploaded_files = []
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
 with st.sidebar:
 
-    st.title("🤖 RAG Chatbot")
-
-    st.markdown("---")
+    st.title("📚 StudyMate")
 
     st.markdown(
         """
-        ### About
+        **AI-powered document assistant**
 
-        This chatbot uses:
-
-        - 📄 PDF documents
-        - ✂️ Text chunking
-        - 🧠 HuggingFace embeddings
-        - 🔍 FAISS vector search
-        - 🦙 Ollama
-        - 💬 Streamlit
+        Upload one or multiple PDF documents
+        and ask questions about their contents.
         """
     )
 
-    st.markdown("---")
+    st.divider()
 
-    st.markdown("### Current Model")
 
-    st.info("llama3.2:3b")
+    # ========================================================
+    # PDF UPLOAD
+    # ========================================================
 
-    st.markdown("---")
+    st.subheader("📄 Upload Documents")
+
+    uploaded_files = st.file_uploader(
+        "Choose PDF files",
+        type=["pdf"],
+        accept_multiple_files=True,
+        help="You can select multiple PDF files."
+    )
+
+
+    # ========================================================
+    # SHOW SELECTED FILES
+    # ========================================================
+
+    if uploaded_files:
+
+        st.write(
+            f"**{len(uploaded_files)} PDF(s) selected**"
+        )
+
+        for uploaded_file in uploaded_files:
+
+            st.markdown(
+                f"""
+                <div class="document-card">
+                    📄 {uploaded_file.name}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+
+        # ====================================================
+        # PROCESS BUTTON
+        # ====================================================
+
+        process_button = st.button(
+            "🚀 Process Documents",
+            use_container_width=True,
+            type="primary"
+        )
+
+
+        if process_button:
+
+            temp_dir = None
+
+            try:
+
+                with st.spinner(
+                    "Processing documents..."
+                ):
+
+                    # ----------------------------------------
+                    # Create temporary directory
+                    # ----------------------------------------
+
+                    temp_dir = tempfile.mkdtemp(
+                        prefix="studymate_"
+                    )
+
+
+                    # ----------------------------------------
+                    # Save uploaded PDFs
+                    # ----------------------------------------
+
+                    pdf_paths = []
+
+                    progress = st.progress(
+                        0
+                    )
+
+                    total_files = len(
+                        uploaded_files
+                    )
+
+
+                    for index, uploaded_file in enumerate(
+                        uploaded_files
+                    ):
+
+                        pdf_path = (
+                            Path(temp_dir)
+                            / uploaded_file.name
+                        )
+
+
+                        with open(
+                            pdf_path,
+                            "wb"
+                        ) as file:
+
+                            file.write(
+                                uploaded_file.getbuffer()
+                            )
+
+
+                        pdf_paths.append(
+                            str(pdf_path)
+                        )
+
+
+                        progress.progress(
+                            int(
+                                ((index + 1)
+                                 / total_files)
+                                * 50
+                            )
+                        )
+
+
+                    # ----------------------------------------
+                    # Create FAISS vector store
+                    # ----------------------------------------
+
+                    create_vector_store(
+                        pdf_paths
+                    )
+
+
+                    progress.progress(
+                        100
+                    )
+
+
+                    # ----------------------------------------
+                    # Save document information
+                    # ----------------------------------------
+
+                    st.session_state.documents_processed = True
+
+                    st.session_state.uploaded_files = [
+                        uploaded_file.name
+                        for uploaded_file
+                        in uploaded_files
+                    ]
+
+
+                    # ----------------------------------------
+                    # Clear old chat
+                    # ----------------------------------------
+
+                    st.session_state.messages = []
+
+
+                st.success(
+                    f"Successfully processed "
+                    f"{len(uploaded_files)} PDF(s)! 🎉"
+                )
+
+
+            except Exception as e:
+
+                st.error(
+                    "❌ Error processing documents"
+                )
+
+                st.exception(
+                    e
+                )
+
+
+            finally:
+
+                # --------------------------------------------
+                # Remove temporary files
+                # --------------------------------------------
+
+                if temp_dir:
+
+                    shutil.rmtree(
+                        temp_dir,
+                        ignore_errors=True
+                    )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # CURRENT DOCUMENTS
+    # ========================================================
+
+    st.subheader(
+        "📚 Current Knowledge Base"
+    )
+
+
+    if st.session_state.documents_processed:
+
+        st.success(
+            "🟢 Ready for questions"
+        )
+
+        st.write(
+            "**Documents:**"
+        )
+
+        for filename in st.session_state.uploaded_files:
+
+            st.write(
+                f"📄 {filename}"
+            )
+
+    else:
+
+        st.info(
+            "No documents processed yet."
+        )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # MODEL
+    # ========================================================
+
+    st.subheader(
+        "🤖 AI Model"
+    )
+
+    st.write(
+        "Ollama"
+    )
+
+    st.code(
+        "llama3.2:3b"
+    )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # CLEAR CHAT
+    # ========================================================
 
     if st.button(
         "🗑️ Clear Chat",
@@ -126,82 +388,136 @@ with st.sidebar:
 
 
 # ============================================================
-# HEADER
+# MAIN HEADER
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">🤖 RAG Chatbot</div>',
+    '<div class="main-title">🤖 StudyMate RAG</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    '<div class="subtitle">'
-    'Ask questions about your document'
-    '</div>',
+    """
+    <div class="subtitle">
+        Upload your PDFs and chat with your documents.
+    </div>
+    """,
     unsafe_allow_html=True
 )
-
-
-# ============================================================
-# INITIALIZE CHAT HISTORY
-# ============================================================
-
-if "messages" not in st.session_state:
-
-    st.session_state.messages = []
 
 
 # ============================================================
 # WELCOME MESSAGE
 # ============================================================
 
-if len(st.session_state.messages) == 0:
+if not st.session_state.messages:
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+        "assistant"
+    ):
 
         st.markdown(
             """
-            👋 **Hello!**
+            👋 **Hello! I'm StudyMate.**
 
-            I'm your RAG chatbot.
+            I can answer questions using your uploaded
+            PDF documents.
 
-            Ask me something about the PDF in your knowledge base.
+            ### 🚀 Getting Started
 
-            **Try asking:**
+            1. Upload one or more PDFs from the sidebar.
+            2. Click **Process Documents**.
+            3. Ask me questions about your documents.
+
+            ### 💡 Example Questions
 
             - What is RAG?
-            - What is artificial intelligence?
-            - What is a primary key?
-            - What is FAISS?
-            - What are the stages of SDLC?
+            - Explain this concept in simple words.
+            - Give me the important points.
+            - Summarize this topic.
+            - Explain it with an example.
             """
         )
 
 
 # ============================================================
-# DISPLAY CHAT HISTORY
+# CHAT HISTORY
 # ============================================================
 
 for message in st.session_state.messages:
 
-    with st.chat_message(message["role"]):
+    with st.chat_message(
+        message["role"]
+    ):
 
-        st.markdown(message["content"])
+        st.markdown(
+            message["content"]
+        )
 
-        # Show sources for assistant messages
+
+        # ====================================================
+        # SOURCES
+        # ====================================================
+
         if (
             message["role"] == "assistant"
-            and message.get("sources")
+            and "sources" in message
         ):
 
-            with st.expander("📚 View Sources"):
+            sources = message["sources"]
 
-                for source in message["sources"]:
 
-                    st.write(
-                        f"📄 **{source['source']}** "
-                        f"| Page **{source['page']}**"
+            if sources:
+
+                st.markdown(
+                    "### 📚 Sources"
+                )
+
+
+                displayed_sources = set()
+
+
+                for document in sources:
+
+                    source = document.metadata.get(
+                        "source",
+                        "Unknown document"
                     )
+
+                    page = document.metadata.get(
+                        "page",
+                        None
+                    )
+
+
+                    if page is not None:
+
+                        source_text = (
+                            f"📄 **{source}** "
+                            f"— Page {page + 1}"
+                        )
+
+                    else:
+
+                        source_text = (
+                            f"📄 **{source}**"
+                        )
+
+
+                    if source_text not in displayed_sources:
+
+                        st.markdown(
+                            f"""
+                            <div class="source-box">
+                                {source_text}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        displayed_sources.add(
+                            source_text
+                        )
 
 
 # ============================================================
@@ -209,25 +525,30 @@ for message in st.session_state.messages:
 # ============================================================
 
 question = st.chat_input(
-    "Ask something about your document..."
+    "Ask StudyMate about your documents..."
 )
 
 
-# ============================================================
-# PROCESS USER QUESTION
-# ============================================================
-
 if question:
 
-    # --------------------------------------------------------
-    # Display user message
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK DOCUMENTS
+    # ========================================================
 
-    with st.chat_message("user"):
+    if not st.session_state.documents_processed:
 
-        st.markdown(question)
+        st.warning(
+            "📄 Please upload and process at least "
+            "one PDF before asking questions."
+        )
 
-    # Save user message
+        st.stop()
+
+
+    # ========================================================
+    # USER MESSAGE
+    # ========================================================
+
     st.session_state.messages.append(
         {
             "role": "user",
@@ -236,112 +557,128 @@ if question:
     )
 
 
-    # --------------------------------------------------------
-    # Generate assistant response
-    # --------------------------------------------------------
+    with st.chat_message(
+        "user"
+    ):
 
-    with st.chat_message("assistant"):
+        st.markdown(
+            question
+        )
 
-        with st.spinner(
-            "🔍 Searching your documents..."
-        ):
 
-            try:
+    # ========================================================
+    # ASSISTANT RESPONSE
+    # ========================================================
+
+    with st.chat_message(
+        "assistant"
+    ):
+
+        try:
+
+            with st.spinner(
+                "StudyMate is thinking..."
+            ):
 
                 answer, documents = get_rag_response(
                     question
                 )
 
 
-                # ------------------------------------------------
-                # Display answer
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # Answer
+            # ------------------------------------------------
 
-                st.markdown(answer)
+            st.markdown(
+                answer
+            )
 
 
-                # ------------------------------------------------
-                # Extract sources
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # Sources
+            # ------------------------------------------------
 
-                sources = []
+            if documents:
+
+                st.markdown(
+                    "### 📚 Sources"
+                )
+
+
+                displayed_sources = set()
+
 
                 for document in documents:
 
-                    source_path = document.metadata.get(
+                    source = document.metadata.get(
                         "source",
-                        "Unknown"
+                        "Unknown document"
                     )
 
-                    page_number = document.metadata.get(
+                    page = document.metadata.get(
                         "page",
                         None
                     )
 
-                    if page_number is not None:
 
-                        page_number = page_number + 1
+                    if page is not None:
+
+                        source_text = (
+                            f"📄 **{source}** "
+                            f"— Page {page + 1}"
+                        )
 
                     else:
 
-                        page_number = "Unknown"
+                        source_text = (
+                            f"📄 **{source}**"
+                        )
 
 
-                    source = {
-                        "source": source_path,
-                        "page": page_number
-                    }
+                    if source_text not in displayed_sources:
+
+                        st.markdown(
+                            f"""
+                            <div class="source-box">
+                                {source_text}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        displayed_sources.add(
+                            source_text
+                        )
 
 
-                    # Avoid duplicate sources
-                    if source not in sources:
+            # ------------------------------------------------
+            # Save assistant response
+            # ------------------------------------------------
 
-                        sources.append(source)
-
-
-                # ------------------------------------------------
-                # Display sources
-                # ------------------------------------------------
-
-                if sources:
-
-                    with st.expander(
-                        "📚 View Sources"
-                    ):
-
-                        for source in sources:
-
-                            st.write(
-                                f"📄 **{source['source']}** "
-                                f"| Page **{source['page']}**"
-                            )
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "sources": documents
+                }
+            )
 
 
-                # ------------------------------------------------
-                # Save assistant message
-                # ------------------------------------------------
+        except Exception as e:
 
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "sources": sources
-                    }
-                )
+            error_message = (
+                f"❌ Error generating response: {e}"
+            )
 
 
-            except Exception as e:
+            st.error(
+                error_message
+            )
 
-                error_message = str(e)
 
-                st.error(
-                    "❌ Something went wrong."
-                )
-
-                with st.expander(
-                    "🔧 Error Details"
-                ):
-
-                    st.code(
-                        error_message
-                    )
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": error_message
+                }
+            )

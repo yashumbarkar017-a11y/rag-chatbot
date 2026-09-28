@@ -6,47 +6,137 @@ from src.document_loader import load_and_split_pdf
 from src.embeddings import get_embeddings
 
 
+# ============================================================
+# VECTOR STORE LOCATION
+# ============================================================
+
 VECTORSTORE_PATH = "vectorstore"
 
 
-def create_vector_store(pdf_path: str):
+# ============================================================
+# CREATE VECTOR STORE
+# ============================================================
+
+def create_vector_store(pdf_paths):
     """
-    Load a PDF, split it into chunks, create embeddings,
-    and save the FAISS vector store.
+    Create a FAISS vector store from one or multiple PDFs.
+
+    Parameters
+    ----------
+    pdf_paths : list[str] or str
+        Paths of the PDF files.
+
+    Returns
+    -------
+    FAISS
+        Created FAISS vector store.
     """
 
-    print("Loading PDF...")
+    # --------------------------------------------------------
+    # Convert single path to list
+    # --------------------------------------------------------
 
-    chunks = load_and_split_pdf(pdf_path)
+    if isinstance(pdf_paths, str):
+        pdf_paths = [pdf_paths]
 
-    print(f"Loaded {len(chunks)} chunks.")
+    # --------------------------------------------------------
+    # Store chunks from all PDFs
+    # --------------------------------------------------------
 
-    print("Creating embeddings...")
+    all_chunks = []
+
+    # --------------------------------------------------------
+    # Process every PDF
+    # --------------------------------------------------------
+
+    for pdf_path in pdf_paths:
+
+        print(
+            f"\nLoading PDF: {pdf_path}"
+        )
+
+        chunks = load_and_split_pdf(
+            pdf_path
+        )
+
+        print(
+            f"Chunks created: {len(chunks)}"
+        )
+
+        all_chunks.extend(
+            chunks
+        )
+
+    # --------------------------------------------------------
+    # Make sure chunks exist
+    # --------------------------------------------------------
+
+    if not all_chunks:
+
+        raise ValueError(
+            "No text could be extracted from the uploaded PDFs."
+        )
+
+    print(
+        f"\nTotal chunks: {len(all_chunks)}"
+    )
+
+    # --------------------------------------------------------
+    # Create embeddings
+    # --------------------------------------------------------
+
+    print(
+        "Creating embeddings..."
+    )
 
     embeddings = get_embeddings()
 
-    print("Creating FAISS vector store...")
+    # --------------------------------------------------------
+    # Create FAISS
+    # --------------------------------------------------------
+
+    print(
+        "Creating FAISS vector store..."
+    )
 
     vector_store = FAISS.from_documents(
-        chunks,
+        all_chunks,
         embeddings
     )
 
-    Path(VECTORSTORE_PATH).mkdir(
+    # --------------------------------------------------------
+    # Create directory
+    # --------------------------------------------------------
+
+    Path(
+        VECTORSTORE_PATH
+    ).mkdir(
         parents=True,
         exist_ok=True
     )
 
-    vector_store.save_local(VECTORSTORE_PATH)
+    # --------------------------------------------------------
+    # Save vector store
+    # --------------------------------------------------------
 
-    print("Vector store created successfully!")
+    vector_store.save_local(
+        VECTORSTORE_PATH
+    )
+
+    print(
+        "\nVector store created successfully!"
+    )
 
     return vector_store
 
 
+# ============================================================
+# LOAD VECTOR STORE
+# ============================================================
+
 def load_vector_store():
     """
-    Load an existing FAISS vector store.
+    Load the existing FAISS vector store.
     """
 
     embeddings = get_embeddings()
